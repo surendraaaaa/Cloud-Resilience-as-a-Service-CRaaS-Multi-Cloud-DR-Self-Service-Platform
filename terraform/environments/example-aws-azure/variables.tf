@@ -21,3 +21,16 @@ variable "azure_container_name" {
   type    = string
   default = "my-container"  # or your container name
 }
+
+
+variable "env" {
+  description = "Environment name"
+  default     = "dev"
+}
+
+
+
+variable "sns_alert_email" {
+  description = "Email for SNS alerts"
+  default     = "you@example.com"
+}

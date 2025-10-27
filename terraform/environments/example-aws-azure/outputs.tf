@@ -11,7 +11,7 @@ output "aws_s3_bucket" {
 }
 
 output "azure_storage_account" {
-  value = module.azure_app.storage_account_name
+  value = module.azure.storage_account_name
 }
 
 output "vm_id" {

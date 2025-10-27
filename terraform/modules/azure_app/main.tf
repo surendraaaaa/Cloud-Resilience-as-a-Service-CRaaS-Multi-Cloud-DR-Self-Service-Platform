@@ -1,19 +1,29 @@
+##############################################################
+# Azure Infrastructure Module (Compute + Network + Storage)
+# Cold DR Enabled (VM deallocated by default)
+##############################################################
+
 # -----------------------------
 # Resource Group
 # -----------------------------
-resource "azurerm_resource_group" "my_rg" {
+resource "azurerm_resource_group" "rg" {
   name     = "${var.env}-${var.app_name}-rg"
   location = var.azure_location
 }
 
 # -----------------------------
-# Virtual Network 
+# Virtual Network
 # -----------------------------
-resource "azurerm_virtual_network" "my_vnet" {
-  name                 = "${var.env}-${var.app_name}-vnet"
-  resource_group_name  = azurerm_resource_group.my_rg.name
-  location             = azurerm_resource_group.my_rg.location
-  address_space        = var.vn_address_space
+resource "azurerm_virtual_network" "vnet" {
+  name                = "${var.env}-${var.app_name}-vnet"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  address_space       = var.vn_address_space
+
+  tags = {
+    Environment = var.env
+    App         = var.app_name
+  }
 }
 
 # -----------------------------
@@ -25,10 +35,10 @@ resource "azurerm_network_security_group" "nsg" {
   resource_group_name = azurerm_resource_group.rg.name
 
   dynamic "security_rule" {
-    for_each = var.allowed_ports
+    for_each = toset(var.allowed_ports)
     content {
       name                       = "allow-port-${security_rule.value}"
-      priority                   = 1000 + tonumber(security_rule.value)
+      priority                   = 1000 + index(tolist(var.allowed_ports), security_rule.value)
       direction                  = "Inbound"
       access                     = "Allow"
       protocol                   = "Tcp"
@@ -38,16 +48,21 @@ resource "azurerm_network_security_group" "nsg" {
       destination_address_prefix  = "*"
     }
   }
+
+  tags = {
+    Environment = var.env
+    App         = var.app_name
+  }
 }
 
 # -----------------------------
 # Subnets
 # -----------------------------
 resource "azurerm_subnet" "public" {
-  name = "${var.env}-${var.app_name}-public-subnet"
-  resource_group_name = azurerm_resource_group.my_rg.name
-  virtual_network_name = azurerm_virtual_network.my_vnet.name
-  address_prefixes = var.public_subnet_address_prefixes
+  name                 = "${var.env}-${var.app_name}-public-subnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = var.public_subnet_address_prefixes
 }
 
 resource "azurerm_subnet" "private" {
@@ -65,6 +80,11 @@ resource "azurerm_public_ip" "public_ip" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   allocation_method   = "Dynamic"
+
+  tags = {
+    Environment = var.env
+    App         = var.app_name
+  }
 }
 
 resource "azurerm_network_interface" "nic" {
@@ -78,16 +98,20 @@ resource "azurerm_network_interface" "nic" {
     private_ip_address_allocation = "Dynamic"
     public_ip_address_id          = azurerm_public_ip.public_ip.id
   }
+
+  tags = {
+    Environment = var.env
+    App         = var.app_name
+  }
 }
 
-# Associate NSG
 resource "azurerm_network_interface_security_group_association" "nsg_assoc" {
   network_interface_id      = azurerm_network_interface.nic.id
   network_security_group_id = azurerm_network_security_group.nsg.id
 }
 
 # -----------------------------
-# Virtual Machine
+# Virtual Machine (Cold DR)
 # -----------------------------
 resource "azurerm_linux_virtual_machine" "vm" {
   name                = "${var.env}-${var.app_name}-vm"
@@ -110,18 +134,33 @@ resource "azurerm_linux_virtual_machine" "vm" {
 
   source_image_reference {
     publisher = "Canonical"
-    offer     = "UbuntuServer"
+    offer     = "0001-com-ubuntu-server-focal"
     sku       = "20_04-lts"
     version   = "latest"
   }
 
   tags = {
-    Name = "${var.env}-${var.app_name}-vm"
+    Environment = var.env
+    App         = var.app_name
   }
 }
 
 # -----------------------------
-# Storage Account
+# Stop VM after creation (Cold DR)
+# -----------------------------
+resource "null_resource" "deallocate_vm" {
+  provisioner "local-exec" {
+    command = <<EOT
+      az login --identity
+      az vm deallocate --resource-group ${azurerm_resource_group.rg.name} --name ${azurerm_linux_virtual_machine.vm.name}
+    EOT
+  }
+
+  depends_on = [azurerm_linux_virtual_machine.vm]
+}
+
+# -----------------------------
+# Storage Account & Container
 # -----------------------------
 resource "random_id" "storage_suffix" {
   byte_length = 4
@@ -133,107 +172,17 @@ resource "azurerm_storage_account" "storage" {
   location                 = azurerm_resource_group.rg.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
+
+  tags = {
+    Environment = var.env
+    App         = var.app_name
+  }
 }
 
+resource "azurerm_storage_container" "container" {
+  name                  = "dr-container"
+  storage_account_name  = azurerm_storage_account.storage.name
+  container_access_type = "private"
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# resource "azurerm_resource_group" "main" {
-#   name     = "${var.app_name}-rg"
-#   location = var.azure_location
-# }
-
-# resource "azurerm_storage_account" "storage" {
-#   name                     = "${replace(var.app_name, "-", "")}storage"
-#   resource_group_name      = azurerm_resource_group.main.name
-#   location                 = azurerm_resource_group.main.location
-#   account_tier             = "Standard"
-#   account_replication_type = "LRS"
-# }
-
-# resource "azurerm_virtual_network" "vnet" {
-#   name                = "${var.app_name}-vnet"
-#   resource_group_name = azurerm_resource_group.main.name
-#   location            = azurerm_resource_group.main.location
-#   address_space       = ["10.1.0.0/16"]
-# }
-
-# resource "azurerm_subnet" "subnet" {
-#   name                 = "internal"
-#   resource_group_name  = azurerm_resource_group.main.name
-#   virtual_network_name = azurerm_virtual_network.vnet.name
-#   address_prefixes     = ["10.1.1.0/24"]
-# }
-
-# resource "azurerm_network_interface" "nic" {
-#   name                = "${var.app_name}-nic"
-#   location            = azurerm_resource_group.main.location
-#   resource_group_name = azurerm_resource_group.main.name
-
-#   ip_configuration {
-#     name                          = "internal"
-#     subnet_id                     = azurerm_subnet.subnet.id
-#     private_ip_address_allocation = "Dynamic"
-#   }
-# }
-
-# resource "azurerm_linux_virtual_machine" "vm" {
-#   name                = "${var.app_name}-vm"
-#   resource_group_name = azurerm_resource_group.main.name
-#   location            = azurerm_resource_group.main.location
-#   size                = var.vm_size
-#   admin_username      = "azureuser"
-
-#   admin_ssh_key {
-#     username   = "azureuser"
-#     public_key = file("~/.ssh/id_rsa.pub")
-#   }
-
-#   network_interface_ids = [azurerm_network_interface.nic.id]
-#   os_disk {
-#     caching              = "ReadWrite"
-#     storage_account_type = "Standard_LRS"
-#   }
-
-#   source_image_reference {
-#     publisher = "Canonical"
-#     offer     = "0001-com-ubuntu-server-focal"
-#     sku       = "20_04-lts"
-#     version   = "latest"
-#   }
-# }
 

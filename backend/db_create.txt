@@ -1,0 +1,13 @@
+Run in MySQL:
+
+CREATE DATABASE multicloud;
+
+USE multicloud;
+
+CREATE TABLE workspaces (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  workspace VARCHAR(255) UNIQUE NOT NULL,
+  app_name VARCHAR(255),
+  outputs JSON,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

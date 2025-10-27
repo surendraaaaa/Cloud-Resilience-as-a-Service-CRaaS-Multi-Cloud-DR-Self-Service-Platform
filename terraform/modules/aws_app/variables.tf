@@ -19,7 +19,7 @@ variable "vpc_cidr" {
   type = string
 }
 
-variable "pub_subnet_cidr" {
+variable "public_subnet_cidr" {
   default = "10.0.1.0/24"
   type = string
 }
